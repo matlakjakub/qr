@@ -2,17 +2,35 @@
 <html lang="pl">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Prezentacja</title>
 <style>
-  body { margin: 0; background: #222; color: #eee; font-family: system-ui, sans-serif; }
-  #msg { padding: 2em; text-align: center; }
-  #pages canvas { display: block; width: 100%; height: auto; margin: 0 auto 8px; background: #fff; }
+  html, body { margin: 0; height: 100%; background: #000; color: #eee;
+               font-family: system-ui, sans-serif; overflow: hidden; }
+  #msg { position: fixed; inset: 0; display: flex; align-items: center;
+         justify-content: center; text-align: center; padding: 2em; }
+  #track { display: flex; height: 100%; height: 100dvh; overflow-x: auto; overflow-y: hidden;
+           scroll-snap-type: x mandatory; scrollbar-width: none; overscroll-behavior-x: contain; }
+  #track::-webkit-scrollbar { display: none; }
+  .slide { flex: 0 0 100%; height: 100%; scroll-snap-align: center; scroll-snap-stop: always;
+           display: flex; align-items: center; justify-content: center; color: #777; }
+  .slide img { display: block; max-width: 100%; max-height: 100%; }
+  #counter { position: fixed; left: 50%; transform: translateX(-50%);
+             bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+             background: rgba(0,0,0,.55); padding: 4px 12px; border-radius: 999px;
+             font-size: 14px; pointer-events: none; }
+  #fs { position: fixed; top: calc(10px + env(safe-area-inset-top, 0px)); right: 10px;
+        width: 40px; height: 40px; border: 0; border-radius: 8px;
+        background: rgba(0,0,0,.55); color: #fff; font-size: 20px; cursor: pointer; }
+  [hidden] { display: none !important; }
 </style>
 </head>
 <body>
 <div id="msg">Wczytuję prezentację…</div>
-<div id="pages"></div>
+<div id="track"></div>
+<div id="counter" hidden></div>
+<button id="fs" title="Pełny ekran" hidden>⛶</button>
+
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script>
 const API = 'https://script.google.com/macros/s/AKfycbyMzuIqdXBb8tMRCveZ0Zx3CAL28fYjDrprt3CegP-MBC5JGNNFqQuM4V51gpOq7DzSiQ/exec';
@@ -20,7 +38,44 @@ pdfjsLib.GlobalWorkerOptions.workerSrc =
   'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
 const msg = document.getElementById('msg');
-const pages = document.getElementById('pages');
+const track = document.getElementById('track');
+const counter = document.getElementById('counter');
+const fsBtn = document.getElementById('fs');
+let total = 0, current = 1;
+
+function update() {
+  current = Math.round(track.scrollLeft / track.clientWidth) + 1;
+  counter.textContent = current + ' / ' + total;
+}
+function go(delta) {
+  const i = Math.min(Math.max(current - 1 + delta, 0), total - 1);
+  track.scrollTo({ left: i * track.clientWidth, behavior: 'smooth' });
+}
+
+track.addEventListener('scroll', update, { passive: true });
+// stuknięcie w lewą / prawą część ekranu = poprzedni / następny slajd
+track.addEventListener('click', e => {
+  if (e.clientX < innerWidth * 0.3) go(-1);
+  else if (e.clientX > innerWidth * 0.7) go(1);
+});
+document.addEventListener('keydown', e => {
+  if (['ArrowRight', 'PageDown', ' '].includes(e.key)) { e.preventDefault(); go(1); }
+  if (['ArrowLeft', 'PageUp'].includes(e.key)) { e.preventDefault(); go(-1); }
+});
+// po obróceniu telefonu zostań na tym samym slajdzie
+addEventListener('resize', () => {
+  const keep = current;
+  requestAnimationFrame(() => { track.scrollLeft = (keep - 1) * track.clientWidth; update(); });
+});
+
+// pełny ekran (Android, komputer; iPhone tego nie obsługuje)
+if (document.documentElement.requestFullscreen) {
+  fsBtn.hidden = false;
+  fsBtn.addEventListener('click', () => {
+    if (document.fullscreenElement) document.exitFullscreen();
+    else document.documentElement.requestFullscreen().catch(() => {});
+  });
+}
 
 (async () => {
   try {
@@ -35,23 +90,46 @@ const pages = document.getElementById('pages');
     for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
 
     const pdf = await pdfjsLib.getDocument({ data: bytes }).promise;
-    msg.remove();
+    total = pdf.numPages;
 
+    const slides = [];
+    for (let i = 0; i < total; i++) {
+      const s = document.createElement('div');
+      s.className = 'slide';
+      s.textContent = 'Wczytuję slajd…';
+      track.appendChild(s);
+      slides.push(s);
+    }
+    msg.hidden = true;
+    counter.hidden = false;
+    update();
+
+    // rozdzielczość dopasowana do dłuższego boku ekranu, żeby po obróceniu było ostro
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    const width = pages.clientWidth;
+    const target = Math.min(Math.max(screen.width, screen.height) * dpr, 2048);
 
-    for (let n = 1; n <= pdf.numPages; n++) {
+    for (let n = 1; n <= total; n++) {
       const page = await pdf.getPage(n);
       const base = page.getViewport({ scale: 1 });
-      const vp = page.getViewport({ scale: width * dpr / base.width });
+      const vp = page.getViewport({ scale: target / base.width });
       const c = document.createElement('canvas');
       c.width = vp.width;
       c.height = vp.height;
-      pages.appendChild(c);
       await page.render({ canvasContext: c.getContext('2d'), viewport: vp }).promise;
+
+      const blob = await new Promise(r => c.toBlob(r, 'image/jpeg', 0.9));
+      const img = new Image();
+      img.alt = 'Slajd ' + n;
+      img.src = URL.createObjectURL(blob);
+      slides[n - 1].textContent = '';
+      slides[n - 1].appendChild(img);
+
+      c.width = c.height = 0;   // zwolnij pamięć canvasu
+      page.cleanup();
     }
   } catch (e) {
-    document.body.innerHTML = '<div id="msg">Nie udało się wczytać prezentacji.</div>';
+    msg.hidden = false;
+    msg.textContent = 'Nie udało się wczytać prezentacji.';
   }
 })();
 </script>
