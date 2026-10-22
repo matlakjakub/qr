@@ -1,15 +1,59 @@
 <!doctype html>
+<html lang="pl">
+<head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Prezentacja</title>
-<p>Otwieram prezentację…</p>
+<style>
+  body { margin: 0; background: #222; color: #eee; font-family: system-ui, sans-serif; }
+  #msg { padding: 2em; text-align: center; }
+  #pages canvas { display: block; width: 100%; height: auto; margin: 0 auto 8px; background: #fff; }
+</style>
+</head>
+<body>
+<div id="msg">Wczytuję prezentację…</div>
+<div id="pages"></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script>
-fetch('https://script.google.com/macros/s/AKfycbyMzuIqdXBb8tMRCveZ0Zx3CAL28fYjDrprt3CegP-MBC5JGNNFqQuM4V51gpOq7DzSiQ/exec')
-  .then(r => r.text())
-  .then(u => {
-    u = u.trim();
-    if (/^https:\/\/drive\.google\.com\//.test(u)) location.replace(u);
-    else document.body.textContent = 'Brak wskazanej prezentacji.';
-  })
-  .catch(() => document.body.textContent = 'Błąd połączenia.');
+const API = 'https://script.google.com/macros/s/AKfycbyMzuIqdXBb8tMRCveZ0Zx3CAL28fYjDrprt3CegP-MBC5JGNNFqQuM4V51gpOq7DzSiQ/exec';
+pdfjsLib.GlobalWorkerOptions.workerSrc =
+  'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+const msg = document.getElementById('msg');
+const pages = document.getElementById('pages');
+
+(async () => {
+  try {
+    const t = await (await fetch(API + '?format=b64')).text();
+    if (!t) { msg.textContent = 'Brak wskazanej prezentacji.'; return; }
+
+    const { name, data } = JSON.parse(t);
+    document.title = name.replace(/\.pdf$/i, '');
+
+    const bin = atob(data);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+
+    const pdf = await pdfjsLib.getDocument({ data: bytes }).promise;
+    msg.remove();
+
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const width = pages.clientWidth;
+
+    for (let n = 1; n <= pdf.numPages; n++) {
+      const page = await pdf.getPage(n);
+      const base = page.getViewport({ scale: 1 });
+      const vp = page.getViewport({ scale: width * dpr / base.width });
+      const c = document.createElement('canvas');
+      c.width = vp.width;
+      c.height = vp.height;
+      pages.appendChild(c);
+      await page.render({ canvasContext: c.getContext('2d'), viewport: vp }).promise;
+    }
+  } catch (e) {
+    document.body.innerHTML = '<div id="msg">Nie udało się wczytać prezentacji.</div>';
+  }
+})();
 </script>
+</body>
+</html>
