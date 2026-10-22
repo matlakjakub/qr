@@ -1,0 +1,15 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Prezentacja</title>
+<p>Otwieram prezentację…</p>
+<script>
+fetch('https://script.google.com/macros/s/AKfycbyMzuIqdXBb8tMRCveZ0Zx3CAL28fYjDrprt3CegP-MBC5JGNNFqQuM4V51gpOq7DzSiQ/exec')
+  .then(r => r.text())
+  .then(u => {
+    u = u.trim();
+    if (/^https:\/\/drive\.google\.com\//.test(u)) location.replace(u);
+    else document.body.textContent = 'Brak wskazanej prezentacji.';
+  })
+  .catch(() => document.body.textContent = 'Błąd połączenia.');
+</script>
